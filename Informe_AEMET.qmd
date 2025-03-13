@@ -1,0 +1,357 @@
+---
+title: "Informe AEMET"
+# execute:
+  #echo: false
+toc: true #Tabla de contenidos
+format:
+  html:
+    embed-resources: true
+---
+
+### 1. Elegir conjunto de datos
+
+La primera parte de la actvidad consta en elegir un conjunto de datos de la AEMET que abarque más de un mes.
+
+Lo primero que vamos a hacer es cargar la API KEY que nos proporcionó la AEMET por correo electrónico
+
+```{python}
+API_KEY="eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJyYXF1ZWxmZXJ2ZWxAZ21haWwuY29tIiwianRpIjoiYzMzMjgwYWUtMDI3MS00Y2QxLTk4YjItMThkZTgyNGM5NGQ5IiwiaXNzIjoiQUVNRVQiLCJpYXQiOjE3MjgzMTg1NDAsInVzZXJJZCI6ImMzMzI4MGFlLTAyNzEtNGNkMS05OGIyLTE4ZGU4MjRjOTRkOSIsInJvbGUiOiIifQ.NpSLVBOls3r5s6gVyfqIHhzQ0RRjl9zQhhXqju3rWas"
+```
+
+Y posteriormente vamos a cargar los paquetes necesarios para las posteriores ejecuciones de los comandos
+
+```{python}
+import numpy as np 
+import requests
+import pandas as pd
+import pprint
+from datetime import datetime, timedelta
+import matplotlib.pyplot as plt #Graficos
+```
+
+Ahora que ya tenemos la API cargada y los paquetes necesarios también vamos a elegir una base de datos. Nuestra base de datos abarca del 1 de Enero al 31 de Diciembre del año 2023 (365 días)
+
+```{python}
+# Definir fechas de inicio y fin del periodo general
+fecha_inicio_str = "2023-01-01T00:00:00UTC"
+fecha_fin_str = "2023-12-31T00:00:00UTC"
+
+# Convertir las fechas de texto a objetos datetime porque el while necesita las fechas en formato "datetime" para poder compararlas
+fecha_inicio = datetime.strptime(fecha_inicio_str, "%Y-%m-%dT%H:%M:%SUTC")
+fecha_fin = datetime.strptime(fecha_fin_str, "%Y-%m-%dT%H:%M:%SUTC")
+
+# DataFrame para almacenar resultados
+df_datos = pd.DataFrame()
+
+# Iterar en intervalos de 15 días
+while fecha_inicio < fecha_fin:
+    # Calcular el intervalo de fechas
+    fecha_intervalo = fecha_inicio + timedelta(days=15)
+    if fecha_intervalo > fecha_fin:  # Asegurarse de no exceder la fecha final
+        fecha_intervalo = fecha_fin
+    
+    # Convertir las fechas a cadenas de texto para la URL
+    fecha_inicio_str = fecha_inicio.strftime("%Y-%m-%dT%H:%M:%SUTC")
+    fecha_intervalo_str = fecha_intervalo.strftime("%Y-%m-%dT%H:%M:%SUTC")
+    
+    # Construir la URL
+    url = f"https://opendata.aemet.es/opendata/api/valores/climatologicos/diarios/datos/fechaini/{fecha_inicio_str}/fechafin/{fecha_intervalo_str}/todasestaciones?api_key={API_KEY}"
+    
+    # Realizar la solicitud
+    response = requests.get(url)
+    if response.status_code == 200:
+        data_url = response.json().get("datos")
+        if data_url:
+            response_data = requests.get(data_url)
+            if response_data.status_code == 200:
+                datos_json = response_data.json()
+                # Agregar los datos al DataFrame
+                df_temp = pd.json_normalize(datos_json)
+                df_datos = pd.concat([df_datos, df_temp], ignore_index=True)
+    
+    # Actualizar la fecha de inicio al siguiente intervalo
+    fecha_inicio = fecha_intervalo
+```
+
+
+```{python}
+df_datos.info() #una pequeña descripción de los datos
+```
+
+### 2. Narrativa
+Creamos una narrativa que sirva como hilo conductor del análisis.   
+Nuestra narrativa va a ser: 
+
+Promotor de turismo en Asturias: Demostrar que la región tiene menos días de lluvia de lo que se piensa comúnmente
+
+```{python}
+# Filtramos el data frame por la provincia que nos interesa (Asturias)
+# y creamos una copia para no modificar el data frame original 
+df_asturias= df_datos[df_datos["provincia"] == "ASTURIAS"].copy()
+```
+
+```{python}
+# Lo renombramos para tener un nombre corto y volvemod a crear una copia explícita del DataFrame porque sino en el futuro da errores del tipo "SettingWithCopyWarning"
+df = df_asturias.copy()
+```
+
+### 3. Análisis de los datos
+La tercera parte consiste en analizar los datos utilizando Python. Se deberán aplicar técnicas de limpieza, manipulación y consulta de datos.
+
+#### 3.1. Limpieza de datos:
+
+Lo primero puede ser detectar columnas con valores nulos o datos incompletos
+
+```{python}
+df.isnull().sum() # Detecta columnas con valores nulos 
+```
+
+```{python}
+df.shape # Dimensiones del data frame (9377 observaciones y 25 columnas)
+```
+
+```{python}
+# Porcentaje de nulos en la varibale "prec"
+porcentaje_nulos = (141 / 9377) * 100 
+print(porcentaje_nulos)
+```
+
+Dado que el porcentaje de nulos es bajo (1.5%) y como la variable "prec" es clave para la narrativa, eliminar las filas con valores nulos parece la mejor opción para evitar sesgos. 
+
+
+```{python}
+df = df.dropna(subset=['prec'])
+```
+
+```{python}
+df.isnull().sum() # Verificamos que en la variable "prec" hay 0 datos nulos
+```
+
+Otra forma de depurar los datos puede ser cambiando el formato de algunas varibales como la fecha que cambiamos el formato de "objeto" a formato "datetime". 
+Tambien convertimos algunas variables a numéricas como pueden ser las temperaturas, las precipitaciones y las horas de luz.
+
+
+```{python}
+# Establecer tipos de datos:
+
+# Convierte las columnas a los tipos adecuados, especialmente las fechas y valores numéricos:
+df['fecha'] = pd.to_datetime(df['fecha'])
+
+# Reemplazar comas por puntos en las columnas numéricas
+columnas_a_convertir = ['tmed', 'prec', 'tmin', 'tmax','sol']
+for columna in columnas_a_convertir:
+    df[columna] = pd.to_numeric(df[columna].str.replace(',', '.'), errors='coerce')
+
+# Cuando intentas convertir una columna de datos de cadenas (str) a números (float o int), algunos valores podrían no ser válidos (por ejemplo, texto o caracteres especiales).
+# Con errors='coerce', pandas reemplaza esos valores no válidos con NaN.
+
+```
+
+
+```{python}
+df.dtypes #verificamos si cambiamos el tipo de datos
+```
+
+También podemos verificar valores inconsistentes
+
+```{python}
+# Verifica valores improbables, como precipitaciones negativas.
+df[df['prec'] < 0]
+```
+
+#### 3.2. Manipulación de Datos
+
+Puede ser definir un día como lluvioso
+
+```{python}
+# Crea una nueva columna que identifique días lluviosos (por ejemplo, si prec >= 1 mm/h):
+df['es_lluvioso'] = df['prec'] >= 1
+print(df)
+```
+
+También podemos crear agrupaciones para calcular el porcentaje de días lluviosos de cada mes:
+
+```{python}
+# Agrupaciones
+
+# Calcula el porcentaje de días lluviosos en cada mes:
+df['mes'] = df['fecha'].dt.month #Crea una nueva columna con los meses (1,...,12)
+dias_lluviosos_por_mes = df.groupby('mes')['es_lluvioso'].mean() * 100
+print(dias_lluviosos_por_mes)
+```
+
+Obtener un resumen por ciudad de los días que llueve:
+
+```{python}
+resumen_ciudad = df.groupby('nombre')['es_lluvioso'].mean() * 100
+print(resumen_ciudad)
+```
+
+Duración del sol (Analiza los días con más horas de sol):
+
+```{python}
+# Definimos lo que es un día soleado en Asturias
+dias_soleados = df[df['sol'] > 8]  # Por ejemplo, días con más de 8 horas de sol.
+
+# Eliminar duplicados basados en la columna 'fecha' porque en el mismo día puede haber muchos lugares con más de 8 horas de sol
+dias_soleados_unicos = dias_soleados.drop_duplicates(subset='fecha')
+
+# Mostrar el resultado
+print(dias_soleados_unicos.shape)
+
+```
+
+Donde obtenemos 190 días soleados a lo largo de un año (un poco más de la mitad de los días)
+
+Tendencias climáticas por mes
+
+```{python}
+# Precipitaciones (mm/h) en los diferentes meses
+tendencias = df.groupby('mes')['prec'].mean()
+tendencias
+```
+
+Tendencias climáticas por estaciones
+
+```{python}
+
+# Crear un mapa para asociar los meses con las estaciones
+def asignar_estacion(mes):
+    if mes in [12, 1, 2]:
+        return 'Invierno'
+    elif mes in [3, 4, 5]:
+        return 'Primavera'
+    elif mes in [6, 7, 8]:
+        return 'Verano'
+    else:  # [9, 10, 11]
+        return 'Otoño'
+
+# Aplicar la función al DataFrame
+df['estacion'] = df['mes'].apply(asignar_estacion) #Crear una nueva columna llamada "estacion" 
+
+# Calcular la media de los días lluviosos por estación
+lluvia_por_estacion = df.groupby('estacion')['es_lluvioso'].mean() * 100
+
+print(lluvia_por_estacion)
+
+```
+
+En Verano y Primavera aproximadamente solo llueve 1 de cada 4 días 
+
+#### 3.3. Consulta de datos
+
+¿Qué porcentaje de días en el año son lluviosos?
+
+```{python}
+porcentaje_lluviosos = df['es_lluvioso'].mean() * 100
+print(porcentaje_lluviosos)
+```
+
+¿Qué meses tienen menos lluvia?
+
+```{python}
+
+# Agrupar por mes y calcular la suma de precipitaciones
+lluvia_mensual = df.groupby('mes')['prec'].sum()
+
+# Ordenar de menor a mayor
+lluvia_mensual_ordenada = lluvia_mensual.sort_values()
+
+# Imprimir el resultado
+print(lluvia_mensual_ordenada)
+
+```
+
+¿Cuáles son las ciudades con más mayores temperaturas?
+
+```{python}
+
+# Calcular la media por ciudad
+temp_ciudad = df.groupby('nombre')['tmax'].mean()
+
+# Ordenar de mayor a menor
+temp_ciudad_ordenada = temp_ciudad.sort_values(ascending=False)
+
+# Imprimir el resultado
+print(temp_ciudad_ordenada)
+
+```
+
+Compara los días lluviosos entre ciudades y meses:
+
+```{python}
+
+lluvia_ciudad_mes = df.groupby(['nombre', 'mes'])['es_lluvioso'].mean() * 100
+print(lluvia_ciudad_mes)
+```
+
+### 4. Graficos
+
+Incluir al menos un gráfico que represente de forma efectiva la información relevante para su narrativa.
+
+#### 4.1. Lluvia mensual 
+Gráfico de barras para mostrar el total de precipitación mensual
+
+```{python}
+lluvia_mensual.plot(kind='bar', figsize=(10, 6))
+plt.title('Precipitación mensual en Asturias')
+plt.xlabel('Mes')
+plt.ylabel('Total de precipitación (mm)')
+plt.show()
+```
+
+#### 4.2. Relación entre Precipitación y Horas de Sol 
+Un gráfico de dispersión que relacione la precipitación diaria (prec) con las horas de sol (sol) para evaluar si más precipitación tiende a coincidir con menos horas de sol.
+
+```{python}
+# Crear gráfico de dispersión
+plt.figure(figsize=(10, 6))
+plt.scatter(df['prec'], df['sol'], alpha=0.5)
+plt.title('Relación entre precipitación y horas de sol en Asturias')
+plt.xlabel('Precipitación (mm)')
+plt.ylabel('Horas de sol')
+plt.grid()
+plt.show()
+```
+
+¿Por qué es útil?
+Este gráfico visualiza la interacción entre días lluviosos y soleados, mostrando si la lluvia reduce significativamente las horas de sol.
+
+#### 4.3. Horas de sol
+Gráfico de líneas para mostrar la tendencia de las horas de sol por mes
+
+```{python}
+horas_sol_mes = df.groupby('mes')['sol'].mean()
+horas_sol_mes.plot(kind='line', marker='o', figsize=(10, 6))
+plt.title('Promedio de horas de sol por mes en Asturias')
+plt.xlabel('Mes')
+plt.ylabel('Horas de sol')
+plt.grid()
+plt.show()
+```
+
+#### 4.4. Comparación de Temperaturas Mínimas, Medias y Máximas
+Un gráfico de líneas para comparar las temperaturas mínimas (tmin), medias (tmed) y máximas (tmax) promedio por mes.
+
+
+```{python}
+# Agrupar por mes y calcular promedios
+temperaturas_mes = df.groupby('mes')[['tmin', 'tmed', 'tmax']].mean()
+
+# Crear gráfico de líneas
+temperaturas_mes.plot(kind='line', figsize=(12, 6), marker='o')
+plt.title('Temperaturas promedio por mes en Asturias')
+plt.xlabel('Mes')
+plt.ylabel('Temperatura (°C)')
+plt.xticks(range(12), ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'])
+plt.grid()
+plt.legend(['T. Mínima', 'T. Media', 'T. Máxima'])
+plt.show()
+```
+
+En verano llueve poco y hace temperaturas moderadas (20ºC en Gijon) por lo que:
+Adeás de demostrar que no llueve tanto como parece (1 de cada 4 días en primavera y verano) se podrían realizar actividades deportivas en la playa
+en verano como Volley o incluso realizar alguna actividad para niños pequeños para que socilizen y hagan deporte mientras sus padres pueden disfrutar
+de un buen día de playa tranquilos.
+Por lo que podríamos decir que al final junté 2 narrativas como pueden ser la de demostrar que en Asturias no llueve tanto como parece y 
+la de ser una empresa que que se dedica a la promoción de actividades.
