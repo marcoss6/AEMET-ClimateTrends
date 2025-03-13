@@ -1,4 +1,4 @@
-📊 ## Análisis del clima con datos abiertos de AEMET | ✨ Generado con Quarto
+ ## 📊 Análisis del clima con datos abiertos de AEMET | ✨ Generado con Quarto
 
 Este repositorio contiene un informe generado con **Quarto** que analiza datos meteorológicos de la **AEMET (Agencia Estatal de Meteorología de España)**. 
 
